@@ -13,8 +13,10 @@ allow_networks = ["127.0.0.0/8", "::1/128"]
 # (its MAC address: `ip neigh show $(ip route | awk '/default/ {print $3; exit}')`).
 # home_gateway_mac = "aa:bb:cc:dd:ee:ff"
 
-# Where allowed questions go (IP addresses).
-upstreams = ["1.1.1.1", "9.9.9.9"]
+# Where allowed questions go. tls:// = DNS over TLS (port 853): your provider sees that you
+# use encrypted DNS, not which names. The name after # is checked against the certificate.
+# Plain "9.9.9.9" works too, but then every name travels readable.
+upstreams = ["tls://1.1.1.1#cloudflare-dns.com", "tls://9.9.9.9#dns.quad9.net"]
 
 # Block lists (https only), refreshed every list_refresh_hours.
 [[lists]]

@@ -17,12 +17,30 @@ class ConfigError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class Server:
+    host: str
+    port: int
+    tls_name: str = ""      # set: DNS over TLS (RFC 7858), certificate checked against this name
+
+    @property
+    def tls(self) -> bool:
+        return bool(self.tls_name)
+
+    def __str__(self) -> str:
+        return f"tls://{self.host}:{self.port}#{self.tls_name}" if self.tls else f"{self.host}:{self.port}"
+
+
+# Encrypted by default: your provider sees that you use DNS over TLS, not which names.
+DEFAULT_UPSTREAMS = [Server("1.1.1.1", 853, "cloudflare-dns.com"), Server("9.9.9.9", 853, "dns.quad9.net")]
+
+
 @dataclass
 class Settings:
     listen: list[tuple[str, int]] = field(default_factory=lambda: [("127.0.0.1", 53)])
     allow_networks: list = field(default_factory=lambda: [ipaddress.ip_network("127.0.0.0/8"),
                                                            ipaddress.ip_network("::1/128")])
-    upstreams: list[tuple[str, int]] = field(default_factory=lambda: [("1.1.1.1", 53), ("9.9.9.9", 53)])
+    upstreams: list[Server] = field(default_factory=lambda: list(DEFAULT_UPSTREAMS))
     lists: list[tuple[str, str]] = field(default_factory=lambda: list(DEFAULT_LISTS))
     list_refresh_hours: float = 24
     blocked_ttl: int = 300
@@ -66,6 +84,25 @@ def parse_addr(text: str, default_port: int = 53) -> tuple[str, int]:
     return host, port
 
 
+NAME = __import__("re").compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+
+
+def parse_upstream(text: str) -> Server:
+    """"9.9.9.9", "9.9.9.9:53", or "tls://1.1.1.1#cloudflare-dns.com" (port 853 unless given)."""
+    text = text.strip()
+    if text.startswith("tls://"):
+        rest, _, name = text[6:].partition("#")
+        if not NAME.match(name):
+            raise ConfigError(f"{text!r}: DNS over TLS needs the server's name after #, "
+                              "e.g. tls://1.1.1.1#cloudflare-dns.com (its certificate is checked against it)")
+        host, port = parse_addr(rest, 853)
+        return Server(host, port, name.lower())
+    if "://" in text:
+        raise ConfigError(f"{text!r}: only plain addresses and tls:// are supported")
+    host, port = parse_addr(text)
+    return Server(host, port)
+
+
 def load(path: Path | None = None) -> Settings:
     path = path or default_path()
     if not path.exists():
@@ -91,7 +128,7 @@ def parse(raw: dict) -> Settings:
                 # Answering the whole internet would make this an open resolver.
                 raise ConfigError("allow_networks must not contain 0.0.0.0/0 or ::/0")
     if "upstreams" in raw:
-        s.upstreams = [parse_addr(a) for a in raw["upstreams"]]
+        s.upstreams = [parse_upstream(a) for a in raw["upstreams"]]
         if not s.upstreams:
             raise ConfigError("upstreams must not be empty")
     if "lists" in raw:

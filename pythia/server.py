@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import socket
+import ssl
 import struct
 import threading
 import time
@@ -16,7 +17,7 @@ from pathlib import Path
 from . import __version__, dns
 from .blocklist import Lists
 from .cache import Cache
-from .config import Settings
+from .config import Server, Settings
 from .stats import Stats
 
 UPSTREAM_TIMEOUT = 2.0
@@ -25,7 +26,6 @@ MAX_TCP_MESSAGE = 65535
 MAX_IN_FLIGHT = 256       # upstream queries at once; more means a flood, answered SERVFAIL
 MAX_TCP_CONNECTIONS = 100
 MAX_TCP_PER_CLIENT = 10
-SAFE_UDP_SIZE = 1232      # the size every EDNS client accepts (DNS flag day 2020)
 IP_FREEBIND = 15   # Linux: bind an address this machine does not have yet (Wi-Fi not up at boot)
 
 
@@ -49,14 +49,93 @@ class RateLimiter:
         return True
 
 
+class DotConnection:
+    """One TLS connection to a DNS-over-TLS server, shared by many queries at once
+    (RFC 7858 pipelining). Each query gets an id unique on this connection; a reader task
+    hands every answer to the query that waits for it."""
+
+    def __init__(self, server: Server, ctx: ssl.SSLContext):
+        self.server, self.ctx = server, ctx
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
+        self.pending: dict[int, asyncio.Future] = {}
+        self.reading: asyncio.Task | None = None
+        self.lock = asyncio.Lock()
+
+    @property
+    def open(self) -> bool:
+        return self.writer is not None and not self.writer.is_closing()
+
+    async def _connect(self) -> None:
+        self.reader, self.writer = await asyncio.wait_for(
+            asyncio.open_connection(self.server.host, self.server.port, ssl=self.ctx,
+                                    server_hostname=self.server.tls_name), UPSTREAM_TIMEOUT + 1)
+        self.reading = asyncio.get_running_loop().create_task(self._read_loop())
+
+    async def _read_loop(self) -> None:
+        reader = self.reader
+        try:
+            while True:
+                size = struct.unpack("!H", await reader.readexactly(2))[0]
+                data = await reader.readexactly(size)
+                fut = self.pending.pop(dns.response_id(data), None) if len(data) >= 12 else None
+                if fut and not fut.done():
+                    fut.set_result(data)
+        except (OSError, asyncio.IncompleteReadError, struct.error, ssl.SSLError) as exc:
+            self._fail(exc)
+        except asyncio.CancelledError:
+            self._fail(OSError("closed"))
+
+    def _fail(self, exc: BaseException) -> None:
+        for fut in self.pending.values():
+            if not fut.done():
+                fut.set_exception(OSError(f"DNS over TLS connection lost ({exc!r})"))
+        self.pending.clear()
+        if self.writer is not None:
+            self.writer.close()
+        self.writer = None
+
+    async def ask(self, packet: bytes) -> bytes:
+        async with self.lock:
+            if not self.open:
+                await self._connect()
+            qid = secrets.randbelow(65536)
+            while qid in self.pending:
+                qid = secrets.randbelow(65536)
+            fut = asyncio.get_running_loop().create_future()
+            self.pending[qid] = fut
+            msg = dns.with_id(packet, qid)
+            writer = self.writer          # the connection may be replaced once the lock is released
+            writer.write(struct.pack("!H", len(msg)) + msg)
+        try:
+            await writer.drain()
+            answer = await asyncio.wait_for(fut, UPSTREAM_TIMEOUT)
+        finally:
+            self.pending.pop(qid, None)
+        return dns.with_id(answer, dns.response_id(packet))   # back to the id the caller chose
+
+    def close(self) -> None:
+        if self.reading:
+            self.reading.cancel()
+        self._fail(OSError("closed"))
+
+
+def tls_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()          # system CAs, hostname check
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
 class Upstream:
-    def __init__(self, servers: list[tuple[str, int]]):
+    def __init__(self, servers: list[Server], ssl_context: ssl.SSLContext | None = None):
         self.servers = servers
         self.preferred = 0
-        self.failures = {f"{h}:{p}": 0 for h, p in servers}
+        self.failures = {str(s): 0 for s in servers}
         self.last_ok: dict[str, float] = {}
+        self._ctx = ssl_context
+        self._dot: dict[Server, DotConnection] = {}
 
-    async def _udp(self, server: tuple[str, int], packet: bytes) -> bytes:
+    async def _udp(self, server: Server, packet: bytes) -> bytes:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
 
@@ -70,16 +149,16 @@ class Upstream:
                 if not fut.done():
                     fut.set_exception(exc)
 
-        family = socket.AF_INET6 if ":" in server[0] else socket.AF_INET
-        transport, _ = await loop.create_datagram_endpoint(Proto, remote_addr=server, family=family)
+        family = socket.AF_INET6 if ":" in server.host else socket.AF_INET
+        transport, _ = await loop.create_datagram_endpoint(Proto, remote_addr=(server.host, server.port), family=family)
         try:
             transport.sendto(packet)
             return await asyncio.wait_for(fut, UPSTREAM_TIMEOUT)
         finally:
             transport.close()
 
-    async def _tcp(self, server: tuple[str, int], packet: bytes) -> bytes:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(*server), UPSTREAM_TIMEOUT)
+    async def _tcp(self, server: Server, packet: bytes) -> bytes:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(server.host, server.port), UPSTREAM_TIMEOUT)
         try:
             writer.write(struct.pack("!H", len(packet)) + packet)
             await writer.drain()
@@ -88,29 +167,54 @@ class Upstream:
         finally:
             writer.close()
 
+    async def _tls(self, server: Server, packet: bytes) -> bytes:
+        conn = self._dot.get(server)
+        if conn is None:
+            if self._ctx is None:
+                self._ctx = tls_context()
+            conn = self._dot[server] = DotConnection(server, self._ctx)
+        reused = conn.open
+        try:
+            return await conn.ask(packet)
+        except (OSError, asyncio.IncompleteReadError, ssl.SSLError):
+            if not reused:
+                raise
+            # Servers close idle TLS connections; that is not a failure of the server.
+            conn.close()
+            return await conn.ask(packet)
+
     async def ask(self, packet: bytes, tcp: bool) -> bytes:
-        """Forward a query (with its own random id) to the servers in turn."""
+        """Forward a query (with its own random id) to the servers in turn. A TLS server is
+        only ever asked over TLS: there is no silent fall back to plain DNS."""
         last_error: Exception | None = None
         n = len(self.servers)
         for i in range(n):
             idx = (self.preferred + i) % n
             server = self.servers[idx]
-            key = f"{server[0]}:{server[1]}"
+            key = str(server)
             try:
-                answer = await (self._tcp(server, packet) if tcp else self._udp(server, packet))
+                if server.tls:
+                    answer = await self._tls(server, packet)
+                else:
+                    answer = await (self._tcp(server, packet) if tcp else self._udp(server, packet))
                 if dns.response_id(answer) != dns.response_id(packet):
                     raise OSError("answer with the wrong id")
                 self.preferred = idx
                 self.failures[key] = 0
                 self.last_ok[key] = time.time()
                 return answer
-            except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, struct.error) as exc:
+            except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, struct.error, ssl.SSLError) as exc:
                 self.failures[key] += 1
                 last_error = exc
         raise OSError(f"no upstream answered ({last_error!r})")
 
     def health(self) -> list[dict]:
-        return [{"server": k, "failures_in_a_row": v, "last_ok": self.last_ok.get(k)} for k, v in self.failures.items()]
+        return [{"server": k, "failures_in_a_row": v, "last_ok": self.last_ok.get(k),
+                 "encrypted": k.startswith("tls://")} for k, v in self.failures.items()]
+
+    def close(self) -> None:
+        for c in self._dot.values():
+            c.close()
 
 
 def _same_question(query: dns.Query, answer: bytes) -> bool:
@@ -184,10 +288,12 @@ class Pythia:
                 return dns.blocked_response(q, self.s.blocked_ttl)
         key = (q.name, q.qtype, q.qclass)
         cached = self.cache.get(key, q.id)
-        # Over UDP hand out only what the client surely accepts (512 without EDNS, else 1232);
-        # a bigger cached answer is fetched again so the upstream can size or truncate it.
-        limit = SAFE_UDP_SIZE if dns.has_additional(data) else 512
-        if cached is not None and (tcp or len(cached) <= limit):
+        # Over UDP never send more than the client said it accepts (512 without EDNS).
+        limit = dns.udp_limit(data)
+        if cached is not None and not tcp and len(cached) > limit:
+            self.record(client, q.name, q.type_name, "cached", "truncated", (time.monotonic() - start) * 1000)
+            return dns.truncated_response(q)     # the client asks again over TCP
+        if cached is not None:
             self.record(client, q.name, q.type_name, "cached", "", (time.monotonic() - start) * 1000)
             return cached
         if self.in_flight >= MAX_IN_FLIGHT:
@@ -208,6 +314,9 @@ class Pythia:
             return dns.error_response(q, dns.SERVFAIL)
         self.cache.put(key, answer)
         self.record(client, q.name, q.type_name, "forwarded", "", (time.monotonic() - start) * 1000)
+        if not tcp and len(answer) > limit:
+            # A TLS or TCP upstream answers in full; a UDP client then gets "truncated" and retries.
+            return dns.truncated_response(q)
         return dns.with_id(answer, q.id)
 
     # --- status ---------------------------------------------------------------------------------

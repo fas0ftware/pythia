@@ -87,7 +87,7 @@ function renderLists(s) {
   const rows = Object.entries(s.lists).map(([name, n]) => el("div", { class: "item" }, el("span", {}, name), el("span", { class: "mono" }, n.toLocaleString())));
   rows.push(el("div", { class: "item" }, el("span", { class: "muted" }, "listening"), el("span", { class: "mono" }, s.listening.join(", "))));
   for (const u of s.upstreams) {
-    rows.push(el("div", { class: "item" }, el("span", { class: "muted" }, `upstream ${u.server}`),
+    rows.push(el("div", { class: "item" }, el("span", { class: "muted" }, `upstream ${u.server}${u.encrypted ? " 🔒" : " (plain)"}`),
       u.failures_in_a_row ? badge(`${u.failures_in_a_row} failures`, "bad") : badge(u.last_ok ? "ok" : "unused", u.last_ok ? "good" : "")));
   }
   $("#lists").replaceChildren(...rows);

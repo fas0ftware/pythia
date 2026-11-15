@@ -6,6 +6,7 @@ import struct
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -161,7 +162,7 @@ def test_rate_limiter():
 def test_config():
     s = config.parse({"listen": ["127.0.0.1:5354", "[::1]:53"], "upstreams": ["9.9.9.9"],
                       "allow_networks": ["192.168.1.0/24"]})
-    assert s.listen == [("127.0.0.1", 5354), ("::1", 53)] and s.upstreams == [("9.9.9.9", 53)]
+    assert s.listen == [("127.0.0.1", 5354), ("::1", 53)] and s.upstreams == [config.Server("9.9.9.9", 53)]
     for bad in ({"allow_networks": ["0.0.0.0/0"]}, {"upstreams": ["dns.google"]}, {"upstreams": []},
                 {"lists": [{"name": "x", "url": "http://insecure"}]}, {"lists": [{"name": "../x", "url": "https://a"}]}):
         with pytest.raises(config.ConfigError):
@@ -172,7 +173,7 @@ def test_config():
 
 class FakeUpstream(Upstream):
     def __init__(self, ttl=300, fail=False, wrong=False):
-        super().__init__([("192.0.2.53", 53)])
+        super().__init__([config.Server("192.0.2.53", 53)])
         self.ttl, self.fail, self.wrong, self.calls = ttl, fail, wrong, 0
 
     async def ask(self, packet, tcp):
@@ -252,7 +253,7 @@ def test_udp_tcp_and_real_upstream_protocol(tmp_path):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        s = config.Settings(listen=[("127.0.0.1", port)], upstreams=[("127.0.0.1", up_port)], status_file=tmp_path / "s.json")
+        s = config.Settings(listen=[("127.0.0.1", port)], upstreams=[config.Server("127.0.0.1", up_port)], status_file=tmp_path / "s.json")
         p = Pythia(s, Lists(blocked={"ads.example.com"}))
         servers = await server.start(p)
 
@@ -381,18 +382,22 @@ def test_flood_limits():
     assert fails == 400 - server.MAX_IN_FLIGHT and p.in_flight == 0
 
 
-def test_big_cached_answer_not_sent_over_small_udp():
+def test_answers_respect_the_clients_udp_size():
     p, up = make()
     plain = dns.build_query("big.example.org", dns.A)
     # the same question with an EDNS OPT record (UDP size 1232)
     edns = dns.HEADER.pack(0x1234, dns.RD, 1, 0, 0, 1) + plain[12:] + b"\x00" + struct.pack("!HHIH", dns.OPT, 1232, 0, 0)
+    assert dns.udp_limit(plain) == 512 and dns.udp_limit(edns) == 1232
     key = ("big.example.org", dns.A, 1)
     stored = dns.HEADER.pack(0, dns.QR | dns.RA, 1, 0, 0, 0) + dns.parse_query(plain).question
-    for size, query, asks in ((600, plain, 1), (1000, edns, 0), (4000, edns, 1), (4000, plain, 1)):
-        up.calls = 0
+    for size, query, truncated in ((600, plain, True), (1000, edns, False), (4000, edns, True)):
         p.cache._d[key] = (p.cache.clock(), p.cache.clock() + 300, stored + bytes(size), [])
-        run(p.handle(query, "127.0.0.1"))
-        assert up.calls == asks, (size, asks)
+        a = run(p.handle(query, "127.0.0.1"))
+        assert dns.is_truncated(a) == truncated, (size, truncated)
+        assert truncated or len(a) > 1000
+        tcp = run(p.handle(query, "127.0.0.1", tcp=True))
+        assert not dns.is_truncated(tcp) and len(tcp) >= size, "over TCP the full answer"
+    assert up.calls == 0, "all from the cache"
 
 
 def test_tcp_connection_cap():
@@ -416,3 +421,155 @@ def test_tcp_connection_cap():
         return open_now, closed, sum(p.tcp_open.values())
     open_now, closed, after = run(main())
     assert open_now == server.MAX_TCP_PER_CLIENT and closed and after == 0
+
+
+# --- DNS over TLS --------------------------------------------------------------------------
+
+def make_cert(tmp_path, name="dns.test"):
+    import shutil
+    import subprocess
+    if not shutil.which("openssl"):
+        pytest.skip("openssl not installed")
+    key, crt = tmp_path / "key.pem", tmp_path / "cert.pem"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
+                    "-keyout", str(key), "-out", str(crt), "-days", "2", "-subj", f"/CN={name}",
+                    "-addext", f"subjectAltName=DNS:{name}"], check=True, capture_output=True)
+    return key, crt
+
+
+def test_config_upstreams():
+    s = config.parse({"upstreams": ["tls://1.1.1.1#cloudflare-dns.com", "9.9.9.9", "tls://[::1]:8853#dns.test"]})
+    assert s.upstreams[0] == config.Server("1.1.1.1", 853, "cloudflare-dns.com") and s.upstreams[0].tls
+    assert s.upstreams[1] == config.Server("9.9.9.9", 53) and not s.upstreams[1].tls
+    assert s.upstreams[2] == config.Server("::1", 8853, "dns.test")
+    assert all(u.tls for u in config.Settings().upstreams), "encrypted by default"
+    for bad in ("tls://1.1.1.1", "https://1.1.1.1/dns-query", "tls://1.1.1.1#not a name"):
+        with pytest.raises(config.ConfigError):
+            config.parse_upstream(bad)
+
+
+def test_dns_over_tls_pipelining_and_verification(tmp_path):
+    import ssl
+    key, crt = make_cert(tmp_path)
+
+    async def main():
+        sctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        sctx.load_cert_chain(crt, key)
+        seen_conns = []
+
+        async def dot_server(r, w):
+            seen_conns.append(1)
+            try:
+                while True:
+                    size = struct.unpack("!H", await r.readexactly(2))[0]
+                    data = await r.readexactly(size)
+                    await asyncio.sleep(0.05 if dns.parse_query(data).name.startswith("slow") else 0)
+                    ans = answer_for(data, 300)
+                    w.write(struct.pack("!H", len(ans)) + ans)
+                    await w.drain()
+            except (asyncio.IncompleteReadError, ConnectionError):
+                pass
+
+        srv = await asyncio.start_server(dot_server, "127.0.0.1", 0, ssl=sctx)
+        port = srv.sockets[0].getsockname()[1]
+        cctx = ssl.create_default_context(cafile=str(crt))
+        up = Upstream([config.Server("127.0.0.1", port, "dns.test")], ssl_context=cctx)
+        names = [("slow" if i % 3 == 0 else "fast") + f"{i}.example.org" for i in range(20)]
+        packets = [dns.build_query(n, dns.A, qid=1000 + i) for i, n in enumerate(names)]
+        answers = await asyncio.gather(*(up.ask(pk, tcp=False) for pk in packets))
+        # wrong name: the certificate is for dns.test
+        bad = Upstream([config.Server("127.0.0.1", port, "other.test")], ssl_context=cctx)
+        with pytest.raises(OSError):
+            await bad.ask(packets[0], tcp=False)
+        # untrusted certificate (system CAs only)
+        untrusted = Upstream([config.Server("127.0.0.1", port, "dns.test")])
+        with pytest.raises(OSError):
+            await untrusted.ask(packets[0], tcp=False)
+        up.close()
+        bad.close()
+        untrusted.close()
+        srv.close()
+        return answers, len(seen_conns), up.health()
+
+    answers, conns, health = run(main())
+    for i, a in enumerate(answers):
+        assert dns.response_id(a) == 1000 + i, "each answer back with the caller's id"
+        assert dns.parse_query(a[:2] + b"\x00\x00" + a[4:]).name == (("slow" if i % 3 == 0 else "fast") + f"{i}.example.org")
+    assert conns <= 3, "20 queries share one TLS connection (plus the two refused ones)"
+    assert health[0]["encrypted"] is True and health[0]["failures_in_a_row"] == 0
+
+
+def test_tls_upstream_never_falls_back_to_plain(tmp_path):
+    async def main():
+        # nothing listens on this port: the TLS server is down
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            dead = probe.getsockname()[1]
+        up = Upstream([config.Server("127.0.0.1", dead, "dns.test")])
+        with pytest.raises(OSError):
+            await up.ask(dns.build_query("a.org", dns.A), tcp=False)
+        return up.health()
+    assert run(main())[0]["failures_in_a_row"] == 1
+
+
+def test_serve_starts(tmp_path):
+    """The real entry point: start, print the banner, write a status file."""
+    import os
+    import subprocess
+    import sys
+    import time
+    with socket.socket() as a, socket.socket() as b:
+        a.bind(("127.0.0.1", 0))
+        b.bind(("127.0.0.1", 0))
+        dns_port, web_port = a.getsockname()[1], b.getsockname()[1]
+    conf = tmp_path / "p.toml"
+    conf.write_text(f'listen = ["127.0.0.1:{dns_port}"]\nupstreams = ["tls://192.0.2.1#dns.test", "192.0.2.2"]\n'
+                    f'web_port = {web_port}\nlist_refresh_hours = 100000\ndata_dir = "{tmp_path}/data"\n'
+                    f'status_file = "{tmp_path}/status.json"\n')
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.Popen([sys.executable, "-m", "pythia", "--config", str(conf), "serve"], cwd=root,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            env={**os.environ, "PYTHONPATH": str(root)})
+    try:
+        line = proc.stdout.readline()
+        deadline = time.time() + 5
+        while not (tmp_path / "status.json").exists() and time.time() < deadline:
+            time.sleep(0.1)
+    finally:
+        proc.terminate()
+        proc.wait(5)
+    assert line.startswith("Pythia ") and "tls://192.0.2.1:853#dns.test" in line, line
+    assert (tmp_path / "status.json").exists()
+
+
+def test_tls_reconnects_after_the_server_closes_an_idle_connection(tmp_path):
+    import ssl
+    key, crt = make_cert(tmp_path)
+
+    async def main():
+        sctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        sctx.load_cert_chain(crt, key)
+        conns = []
+
+        async def one_answer_then_close(r, w):
+            conns.append(1)
+            size = struct.unpack("!H", await r.readexactly(2))[0]
+            data = await r.readexactly(size)
+            ans = answer_for(data, 300)
+            w.write(struct.pack("!H", len(ans)) + ans)
+            await w.drain()
+            w.close()                      # like a server timing out an idle client
+
+        srv = await asyncio.start_server(one_answer_then_close, "127.0.0.1", 0, ssl=sctx)
+        port = srv.sockets[0].getsockname()[1]
+        up = Upstream([config.Server("127.0.0.1", port, "dns.test")], ssl_context=ssl.create_default_context(cafile=str(crt)))
+        first = await up.ask(dns.build_query("a.example.org", dns.A, qid=1), tcp=False)
+        await asyncio.sleep(0.1)
+        second = await up.ask(dns.build_query("b.example.org", dns.A, qid=2), tcp=False)
+        up.close()
+        srv.close()
+        return first, second, len(conns), up.health()[0]["failures_in_a_row"]
+
+    first, second, conns, failures = run(main())
+    assert dns.response_id(first) == 1 and dns.response_id(second) == 2
+    assert conns == 2 and failures == 0, "reconnected without counting a failure"

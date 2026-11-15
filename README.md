@@ -1,7 +1,7 @@
 # Pythia
 
 [![CI](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
@@ -55,9 +55,13 @@ For each query, over UDP or TCP:
 5. **Cached?** Answers are kept for their TTL (at most a day; `NXDOMAIN` 5 minutes) and
    handed out with the TTLs lowered by the time they waited.
 6. **Forward** the client's own bytes with a fresh random id to the first working
-   upstream (UDP, or TCP when the client used TCP). The answer must carry that id and the
-   same question, or it is thrown away: a spoofed or misrouted answer never reaches a
-   device or the cache.
+   upstream, by default over **DNS over TLS** (RFC 7858, port 853): the certificate is
+   checked against the name you give, one connection carries many queries at once, and
+   a connection the server closed is reopened. A TLS upstream is never asked in plain
+   text, not even when it is down. The answer must carry the right id and the same
+   question, or it is thrown away: a spoofed or misrouted answer never reaches a device
+   or the cache. An answer larger than the client's UDP size (512 bytes, or what its
+   EDNS record says) goes back marked *truncated*, and the client asks again over TCP.
 
 Lists are downloaded over HTTPS once a day. A download that does not look like a list
 (an error page, fewer than 1000 names) keeps the previous copy; the new set replaces the
@@ -117,7 +121,7 @@ every 30 seconds for dashboards such as [Olympos](https://github.com/fas0ftware/
 | `listen` | `["127.0.0.1:53"]` | addresses to answer on; a LAN address is bound even before Wi-Fi is up (`IP_FREEBIND`) |
 | `allow_networks` | loopback | who may ask; `0.0.0.0/0` is refused |
 | `home_gateway_mac` | none | answer network clients only behind this router |
-| `upstreams` | `1.1.1.1`, `9.9.9.9` | IP addresses, tried in turn |
+| `upstreams` | `tls://1.1.1.1#cloudflare-dns.com`, `tls://9.9.9.9#dns.quad9.net` | tried in turn; `tls://IP[:port]#name` = DNS over TLS checked against `name`, a bare `IP[:port]` = plain DNS |
 | `[[lists]]` | StevenBlack hosts | `name` + `https://` URL; hosts files, domain lists and simple `\|\|name^` rules |
 | `list_refresh_hours` | 24 | |
 | `blocked_ttl` | 300 | how long devices remember "blocked" |
@@ -140,8 +144,8 @@ Your allow and block entries live in `~/.local/share/pythia/custom.json`.
   system and home except its own two directories, no devices.
 - **Privacy:** which device asked for which name stays in memory and on the 127.0.0.1
   dashboard; it can be turned off (`log_queries = false`). The status file has counts
-  only. Upstream DNS is plain UDP/TCP: your provider and the upstream can see the names
-  that are not blocked (see the roadmap).
+  only. With the default DNS over TLS your provider sees only that you use encrypted DNS;
+  the upstream (Cloudflare, Quad9) still sees the names that are not blocked.
 - Dashboard: Host/Origin checks, JSON-only POSTs, strict CSP, values inserted as text.
 
 ![Static analysis](docs/security-scan.svg)
@@ -170,13 +174,13 @@ truncated over UDP and retried over TCP by `dig`; `NXDOMAIN` and `ANY`.
 ## Limits
 
 - One machine; no failover between two Pythias.
-- Plain DNS upstream; no DNSSEC validation of its own (it passes the bits through).
+- No DNSSEC validation of its own (it passes the bits through; the upstreams validate).
 - Devices with their own encrypted DNS (some browsers' DNS over HTTPS, Android "private
   DNS") skip any network DNS filter, Pythia included.
 
 ## Roadmap
 
-- Encrypted upstream (DNS over TLS) so the provider cannot read the names.
+- ~~Encrypted upstream (DNS over TLS) so the provider cannot read the names.~~ Done in 0.2.
 - Per-device rules (stricter for a child's tablet) and schedules.
 - History on disk: blocked per day for a month.
 

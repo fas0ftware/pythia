@@ -27,7 +27,7 @@ jobs:
           d="$RUNNER_TEMP/pythia"
           mkdir -p "$d/data/lists"
           { echo "0.0.0.0 doubleclick.net"; for i in $(seq 1 1500); do echo "0.0.0.0 d$i.example.invalid"; done; } > "$d/data/lists/test.txt"
-          printf 'listen = ["127.0.0.1:5354"]\nupstreams = ["1.1.1.1", "9.9.9.9"]\nweb_port = 8749\nlist_refresh_hours = 100000\ndata_dir = "%s/data"\nstatus_file = "%s/status.json"\n[[lists]]\nname = "test"\nurl = "https://example.invalid/test"\n' "$d" "$d" > "$d/p.toml"
+          printf 'listen = ["127.0.0.1:5354"]\nupstreams = ["tls://1.1.1.1#cloudflare-dns.com", "tls://9.9.9.9#dns.quad9.net"]\nweb_port = 8749\nlist_refresh_hours = 100000\ndata_dir = "%s/data"\nstatus_file = "%s/status.json"\n[[lists]]\nname = "test"\nurl = "https://example.invalid/test"\n' "$d" "$d" > "$d/p.toml"
           python -m pythia --config "$d/p.toml" serve > "$d/log" 2>&1 &
           sleep 3
           cat "$d/log"

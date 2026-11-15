@@ -137,6 +137,32 @@ def rcode(data: bytes) -> int:
     return HEADER.unpack_from(data)[1] & 0xF
 
 
+def udp_limit(data: bytes) -> int:
+    """The UDP payload size a query allows: its EDNS OPT record's class field, else 512.
+    Clamped to 512..4096; a malformed additional section counts as no EDNS."""
+    try:
+        _, _, qd, an, ns, ar = HEADER.unpack_from(data)
+        off = HEADER.size
+        for _ in range(qd):
+            _, off = read_name(data, off)
+            off += 4
+        for _ in range(an + ns + ar):
+            _, off = read_name(data, off)
+            rtype, rclass, _, rdlen = struct.unpack_from("!HHIH", data, off)
+            if rtype == OPT:
+                return max(512, min(rclass, 4096))
+            off += 10 + rdlen
+    except (FormatError, struct.error):
+        pass
+    return 512
+
+
+def truncated_response(q: Query) -> bytes:
+    """Header with TC set and the question only: "ask me again over TCP"."""
+    flags = QR | TC | (q.flags & (0x7800 | RD)) | RA
+    return HEADER.pack(q.id, flags, 1, 0, 0, 0) + q.question
+
+
 def has_additional(data: bytes) -> bool:
     """The query carries additional records: in practice an EDNS OPT with a bigger UDP size."""
     return HEADER.unpack_from(data)[5] > 0

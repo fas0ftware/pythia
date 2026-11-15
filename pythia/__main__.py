@@ -52,7 +52,7 @@ async def serve(settings: config.Settings, web: bool = True) -> None:
     p.at_home = home.at_home(settings.home_gateway_mac)
     await start(p)
     print(f"Pythia {__version__}: DNS on {', '.join(p.listening)}, {p.lists.total()} domains blocked, "
-          f"upstream {', '.join(f'{h}:{port}' for h, port in settings.upstreams)}", flush=True)
+          f"upstream {', '.join(str(u) for u in settings.upstreams)}", flush=True)
     if web:
         serve_in_thread(p, settings.web_port, refresh)
     ticks = 0
