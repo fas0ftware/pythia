@@ -50,9 +50,14 @@ class Settings:
     web_port: int = 8748
     data_dir: Path = Path("~/.local/share/pythia").expanduser()
     status_file: Path = Path("~/.local/state/pythia/status.json").expanduser()
+    history_file: Path | None = None       # default: history.json next to the status file
     # Answer network clients only while the default gateway has this MAC (empty: always).
     home_gateway_mac: str = ""
     profiles: list = field(default_factory=list)      # pythia.profiles.Profile
+
+
+def history_path(s: Settings) -> Path:
+    return s.history_file or s.status_file.with_name("history.json")
 
 
 def default_path() -> Path:
@@ -152,6 +157,8 @@ def parse(raw: dict) -> Settings:
         s.data_dir = Path(raw["data_dir"]).expanduser()
     if "status_file" in raw:
         s.status_file = Path(raw["status_file"]).expanduser()
+    if "history_file" in raw:
+        s.history_file = Path(raw["history_file"]).expanduser()
     if "profiles" in raw:
         from .profiles import ProfileError, parse as parse_profiles
         try:

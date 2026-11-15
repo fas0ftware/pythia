@@ -27,18 +27,18 @@ function renderHeader(s) {
 
 function renderStats(s) {
   $("#stats").replaceChildren(
-    stat(String(s.queries_24h), "queries (24 h)", `${s.cached_24h} from cache`),
-    stat(String(s.blocked_24h), "blocked (24 h)", `${s.blocked_percent_24h}% of all`),
+    stat(s.queries_24h.toLocaleString(), "queries (24 h)", `${s.cached_24h} from cache`),
+    stat(s.blocked_24h.toLocaleString(), "blocked (24 h)", `${s.blocked_percent_24h}% of all · ${s.blocked_30d.toLocaleString()} in 30 days`),
     stat(String(s.clients), "devices seen", `since ${ago(s.uptime_s)} ago`),
     stat(s.domains_on_lists.toLocaleString(), "domains on lists", `${s.allow_entries} allowed by you`),
     stat(String(s.errors_24h), "upstream errors (24 h)", s.upstreams.map((u) => `${u.server}${u.failures_in_a_row ? " ✗" : ""}`).join(" · ")),
   );
 }
 
-function renderChart(series) {
+function renderChart(target, series, label) {
   const max = Math.max(1, ...series.map((x) => x.queries));
-  $("#chart").replaceChildren(...series.map((x) => {
-    const col = el("div", { class: "col", title: `${new Date(x.hour * 1000).getHours()}:00 · ${x.queries} queries, ${x.blocked} blocked` });
+  $(target).replaceChildren(...series.map((x) => {
+    const col = el("div", { class: "col", title: `${label(x)} · ${x.queries} queries, ${x.blocked} blocked` });
     const q = el("div", { class: "q" });
     const b = el("div", { class: "b" });
     q.style.height = `${(100 * (x.queries - x.blocked)) / max}%`;
@@ -104,7 +104,12 @@ function render(data) {
   const s = data.summary;
   renderHeader(s);
   renderStats(s);
-  renderChart(data.series);
+  renderChart("#chart", data.series, (x) => `${new Date(x.hour * 1000).getHours()}:00`);
+  renderChart("#chart-days", data.days, (x) => x.date);
+  const known = data.days.filter((d) => d.queries).length;
+  $("#days-note").textContent = known
+    ? `${s.queries_30d.toLocaleString()} queries, ${s.blocked_30d.toLocaleString()} blocked (${s.blocked_percent_30d}%) · ${known} day(s) with data`
+    : "no days recorded yet";
   toplist("#top-blocked", data.top_blocked, "allow", (d) => rule("allow", d));
   toplist("#top-allowed", data.top_allowed, "block", (d) => rule("block", d));
   toplist("#clients", data.clients);

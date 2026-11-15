@@ -21,6 +21,7 @@ STATUS_EVERY = 30
 def build(settings: config.Settings) -> Pythia:
     p = Pythia(settings, Lists())
     load_custom(p)
+    p.load_history()
     lists.reload(p.lists, settings.data_dir)
     return p
 
@@ -80,7 +81,16 @@ def main(argv=None) -> int:
     ck.add_argument("name")
     sub.add_parser("update-lists", help="download the block lists now")
     sub.add_parser("status", help="print the status file the server writes")
+    dm = sub.add_parser("demo", help="only the dashboard, with made-up data (no DNS, no settings needed)")
+    dm.add_argument("--port", type=int, default=8749)
     args = ap.parse_args(argv)
+    if args.cmd == "demo":
+        from . import demo
+        try:
+            demo.serve(args.port)
+        except KeyboardInterrupt:
+            pass
+        return 0
     try:
         settings = config.load(args.config)
     except config.ConfigError as exc:

@@ -17,7 +17,7 @@ from pathlib import Path
 from . import __version__, dns
 from .blocklist import Lists
 from .cache import Cache
-from .config import Server, Settings
+from .config import Server, Settings, history_path
 from .stats import Stats
 
 UPSTREAM_TIMEOUT = 2.0
@@ -367,6 +367,13 @@ class Pythia:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.summary(), indent=2))
         os.replace(tmp, path)
+        with self.stats_lock:          # copy the counts under the lock, write outside it
+            data = self.stats.to_json()
+        Stats.save_data(history_path(self.s), data)
+
+    def load_history(self) -> None:
+        with self.stats_lock:
+            self.stats.load(history_path(self.s))
 
 
 # --- sockets ---------------------------------------------------------------------------------------

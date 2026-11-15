@@ -330,6 +330,7 @@ def test_dashboard_rules_pause_and_guards(web):
     port, p, data_dir = web
     status, state = call(port, "/api/state")
     assert status == 200 and state["top_blocked"] == [["x.ads.example.com", 1]]
+    assert len(state["days"]) == 30 and state["days"][-1]["blocked"] == 1
     assert call(port, "/api/allow", {"domain": "X.Ads.Example.com"})[0] == 200
     assert p.lists.verdict("x.ads.example.com") == (False, "x.ads.example.com")
     assert json.loads((data_dir / "custom.json").read_text())["allow"] == ["x.ads.example.com"]
@@ -621,3 +622,61 @@ def test_profiles_in_the_server():
     assert not run(p.handle(dns.build_query("news.example", dns.A), "192.168.1.50")).endswith(bytes(4)), "pause lifts it"
     s = p.summary()["profiles"][0]
     assert s["name"] == "Kids" and s["bedtime"] == "21-07" and s["bedtime_now"] is True and s["clients"] == ["192.168.1.50/32"]
+
+
+def test_daily_history_survives_a_restart(tmp_path):
+    t = [1_763_200_000.0]
+    st = Stats(clock=lambda: t[0])
+    for _ in range(3):
+        st.record("192.168.1.5", "ads.example", "A", "blocked")
+    st.record("192.168.1.5", "news.example", "A", "forwarded")
+    t[0] += 86400                      # next day
+    st.record("192.168.1.7", "ads.example", "A", "blocked")
+    days = st.days(30)
+    assert len(days) == 30 and days[-1]["queries"] == 1 and days[-2] == {**days[-2], "queries": 4, "blocked": 3}
+    s = st.summary()
+    assert (s["queries_30d"], s["blocked_30d"], s["blocked_percent_30d"]) == (5, 4, 80.0)
+
+    path = tmp_path / "state" / "history.json"
+    st.save(path)
+    raw = path.read_text()
+    assert "ads.example" not in raw and "192.168" not in raw, "counts only, no names or addresses"
+
+    again = Stats(clock=lambda: t[0])
+    assert again.load(path)
+    assert again.days(30) == days and again.last_24h()["blocked"] == st.last_24h()["blocked"]
+
+    t[0] += 40 * 86400                 # old days fall out of the file
+    later = Stats(clock=lambda: t[0])
+    later.load(path)
+    assert later.to_json()["days"] == {} and later.last_24h()["queries"] == 0
+
+    path.write_text('{"days": {"2026-01-01": {"queries": "lots", "blocked": -5}, "x": 1}, "hours": {"nan": {}}}')
+    junk = Stats(clock=lambda: t[0])
+    assert junk.load(path) and sum(d["queries"] for d in junk.days(400)) == 0, "bad entries are skipped"
+    path.write_text("not json")
+    assert not Stats().load(path)
+
+
+def test_server_writes_and_reloads_history(tmp_path):
+    s = config.Settings(status_file=tmp_path / "status.json")
+    p = Pythia(s, Lists())
+    p.record("127.0.0.1", "a.example", "A", "blocked")
+    p.write_status()
+    assert json.loads((tmp_path / "history.json").read_text())["days"]
+    q = Pythia(s, Lists())
+    q.load_history()
+    assert q.summary()["blocked_30d"] == 1
+    assert config.history_path(config.Settings(history_file=tmp_path / "h.json")) == tmp_path / "h.json"
+
+
+def test_demo_is_fictional_and_consistent():
+    from pythia import demo
+    p = demo.build(now=1_763_200_000.0)
+    s = p.summary()
+    assert s["queries_30d"] > s["blocked_30d"] > 0 and s["domains_on_lists"] == 77_309
+    assert all(d["queries"] for d in p.stats.days(30))
+    assert all(e.name.endswith((".com", ".net", ".org", ".io")) and "example" in e.name for e in p.stats.recent)
+    assert p.profile_for("192.168.1.40").name == "tablet"
+    import shutil
+    shutil.rmtree(p.s.data_dir)

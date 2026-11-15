@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="668" viewBox="0 0 920 668">
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="614" viewBox="0 0 920 614">
 <rect width="100%" height="100%" rx="10" fill="#0d1117" stroke="#30363d"/>
 <rect width="100%" height="32" rx="10" fill="#161b22"/><rect y="22" width="100%" height="10" fill="#161b22"/>
 <circle cx="18" cy="16" r="6" fill="#ff5f56"/><circle cx="38" cy="16" r="6" fill="#ffbd2e"/><circle cx="58" cy="16" r="6" fill="#27c93f"/>
@@ -6,36 +6,33 @@
 <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">
 <text x="14" y="56" fill="#58a6ff">$ python -m pytest -v</text>
 <text x="14" y="74" fill="#e6edf3">test_parse_and_blocked_answers                                   PASSED</text>
-<text x="14" y="92" fill="#e6edf3">test_malformed_queries[]                                         PASSED</text>
-<text x="14" y="110" fill="#e6edf3">test_malformed_queries[\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0   PASSED</text>
-<text x="14" y="128" fill="#e6edf3">test_malformed_queries[\x00\x01\x80\x00\x00\x01\x00\x00\x00\x0   PASSED</text>
-<text x="14" y="146" fill="#e6edf3">test_malformed_queries[\x00\x01\x00\x00\x00\x02\x00\x00\x00\x0   PASSED</text>
-<text x="14" y="164" fill="#e6edf3">test_malformed_queries[\x00\x01\x00\x00\x00\x01\x00\x00\x00\x0   PASSED</text>
-<text x="14" y="182" fill="#e6edf3">test_malformed_queries[\x00\x01\x00\x00\x00\x01\x00\x00\x00\x0   PASSED</text>
-<text x="14" y="200" fill="#e6edf3">test_malformed_queries[packet6]                                  PASSED</text>
-<text x="14" y="218" fill="#e6edf3">test_ttl_offsets_and_aging                                       PASSED</text>
-<text x="14" y="236" fill="#e6edf3">test_parse_list_formats                                          PASSED</text>
-<text x="14" y="254" fill="#e6edf3">test_verdict_most_specific_wins                                  PASSED</text>
-<text x="14" y="272" fill="#e6edf3">test_refresh_keeps_old_copy_on_bad_download                      PASSED</text>
-<text x="14" y="290" fill="#e6edf3">test_download_rejects_small_lists                                PASSED</text>
-<text x="14" y="308" fill="#e6edf3">test_cache_ttl_and_aging                                         PASSED</text>
-<text x="14" y="326" fill="#e6edf3">test_rate_limiter                                                PASSED</text>
-<text x="14" y="344" fill="#e6edf3">test_config                                                      PASSED</text>
-<text x="14" y="362" fill="#e6edf3">test_handle_paths                                                PASSED</text>
-<text x="14" y="380" fill="#e6edf3">test_upstream_failures_and_spoofed_answers                       PASSED</text>
-<text x="14" y="398" fill="#e6edf3">test_udp_tcp_and_real_upstream_protocol                          PASSED</text>
-<text x="14" y="416" fill="#e6edf3">test_dashboard_rules_pause_and_guards                            PASSED</text>
-<text x="14" y="434" fill="#e6edf3">test_home_detection                                              PASSED</text>
-<text x="14" y="452" fill="#e6edf3">test_away_from_home_serves_only_this_machine                     PASSED</text>
-<text x="14" y="470" fill="#e6edf3">test_flood_limits                                                PASSED</text>
-<text x="14" y="488" fill="#e6edf3">test_answers_respect_the_clients_udp_size                        PASSED</text>
-<text x="14" y="506" fill="#e6edf3">test_tcp_connection_cap                                          PASSED</text>
-<text x="14" y="524" fill="#e6edf3">test_config_upstreams                                            PASSED</text>
-<text x="14" y="542" fill="#e6edf3">test_dns_over_tls_pipelining_and_verification                    PASSED</text>
-<text x="14" y="560" fill="#e6edf3">test_tls_upstream_never_falls_back_to_plain                      PASSED</text>
-<text x="14" y="578" fill="#e6edf3">test_serve_starts                                                PASSED</text>
-<text x="14" y="596" fill="#e6edf3">test_tls_reconnects_after_the_server_closes_an_idle_connection   PASSED</text>
-<text x="14" y="614" fill="#e6edf3">test_profile_parsing_and_decisions                               PASSED</text>
-<text x="14" y="632" fill="#e6edf3">test_profiles_in_the_server                                      PASSED</text>
-<text x="14" y="650" fill="#3fb950">32 passed in 1.95s</text>
+<text x="14" y="92" fill="#e6edf3">test_malformed_queries                                           PASSED</text>
+<text x="14" y="110" fill="#e6edf3">test_ttl_offsets_and_aging                                       PASSED</text>
+<text x="14" y="128" fill="#e6edf3">test_parse_list_formats                                          PASSED</text>
+<text x="14" y="146" fill="#e6edf3">test_verdict_most_specific_wins                                  PASSED</text>
+<text x="14" y="164" fill="#e6edf3">test_refresh_keeps_old_copy_on_bad_download                      PASSED</text>
+<text x="14" y="182" fill="#e6edf3">test_download_rejects_small_lists                                PASSED</text>
+<text x="14" y="200" fill="#e6edf3">test_cache_ttl_and_aging                                         PASSED</text>
+<text x="14" y="218" fill="#e6edf3">test_rate_limiter                                                PASSED</text>
+<text x="14" y="236" fill="#e6edf3">test_config                                                      PASSED</text>
+<text x="14" y="254" fill="#e6edf3">test_handle_paths                                                PASSED</text>
+<text x="14" y="272" fill="#e6edf3">test_upstream_failures_and_spoofed_answers                       PASSED</text>
+<text x="14" y="290" fill="#e6edf3">test_udp_tcp_and_real_upstream_protocol                          PASSED</text>
+<text x="14" y="308" fill="#e6edf3">test_dashboard_rules_pause_and_guards                            PASSED</text>
+<text x="14" y="326" fill="#e6edf3">test_home_detection                                              PASSED</text>
+<text x="14" y="344" fill="#e6edf3">test_away_from_home_serves_only_this_machine                     PASSED</text>
+<text x="14" y="362" fill="#e6edf3">test_flood_limits                                                PASSED</text>
+<text x="14" y="380" fill="#e6edf3">test_answers_respect_the_clients_udp_size                        PASSED</text>
+<text x="14" y="398" fill="#e6edf3">test_tcp_connection_cap                                          PASSED</text>
+<text x="14" y="416" fill="#e6edf3">test_config_upstreams                                            PASSED</text>
+<text x="14" y="434" fill="#e6edf3">test_dns_over_tls_pipelining_and_verification                    PASSED</text>
+<text x="14" y="452" fill="#e6edf3">test_tls_upstream_never_falls_back_to_plain                      PASSED</text>
+<text x="14" y="470" fill="#e6edf3">test_serve_starts                                                PASSED</text>
+<text x="14" y="488" fill="#e6edf3">test_tls_reconnects_after_the_server_closes_an_idle_connection   PASSED</text>
+<text x="14" y="506" fill="#e6edf3">test_profile_parsing_and_decisions                               PASSED</text>
+<text x="14" y="524" fill="#e6edf3">test_profiles_in_the_server                                      PASSED</text>
+<text x="14" y="542" fill="#e6edf3">test_daily_history_survives_a_restart                            PASSED</text>
+<text x="14" y="560" fill="#e6edf3">test_server_writes_and_reloads_history                           PASSED</text>
+<text x="14" y="578" fill="#e6edf3">test_demo_is_fictional_and_consistent                            PASSED</text>
+<text x="14" y="596" fill="#3fb950">35 passed in 1.93s</text>
 </g></svg>

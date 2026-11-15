@@ -26,6 +26,7 @@ def create_app(p: Pythia, refresh_lists=None) -> App:
             st = p.stats
             data = {
                 "series": st.series(),
+                "days": st.days(30),
                 "top_blocked": st.top_blocked.most_common(15),
                 "top_allowed": st.top_allowed.most_common(15),
                 "clients": st.clients.most_common(20),

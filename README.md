@@ -1,7 +1,7 @@
 # Pythia
 
 [![CI](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
@@ -107,11 +107,17 @@ alone, means no internet at home whenever that machine is off.
 ## Dashboard
 
 `http://127.0.0.1:8748` on the Pythia machine (never on the network: it shows who asked
-for what). Queries and blocks per hour, most blocked and most asked names, devices,
+for what). Queries and blocks per hour for the last 24 hours and per day for the last 30, most blocked and most asked names, devices,
 recent queries with one-click *allow* / *block*, your own rules, list sizes, upstream
 health, and *pause 5 min / 1 h* for when a site breaks. `GET /api/summary` gives the
 counts as JSON, and the same summary is written to `~/.local/state/pythia/status.json`
 every 30 seconds for dashboards such as [Olympos](https://github.com/fas0ftware/olympos).
+
+The hourly and daily counts are kept in `history.json` next to the status file (31 days,
+counts only), so the charts survive a restart.
+
+To see the dashboard without running a DNS server, `python -m pythia demo` serves it on
+`http://127.0.0.1:8749` with made-up devices and names (the screenshot above).
 
 ## Per-device profiles
 
@@ -164,8 +170,8 @@ Your allow and block entries live in `~/.local/share/pythia/custom.json`.
 - **Least privilege:** runs as your user with only `CAP_NET_BIND_SERVICE`, a read-only
   system and home except its own two directories, no devices.
 - **Privacy:** which device asked for which name stays in memory and on the 127.0.0.1
-  dashboard; it can be turned off (`log_queries = false`). The status file has counts
-  only. With the default DNS over TLS your provider sees only that you use encrypted DNS;
+  dashboard; it can be turned off (`log_queries = false`). The status and history
+  files have counts only. With the default DNS over TLS your provider sees only that you use encrypted DNS;
   the upstream (Cloudflare, Quad9) still sees the names that are not blocked.
 - Dashboard: Host/Origin checks, JSON-only POSTs, strict CSP, values inserted as text.
 
@@ -203,7 +209,8 @@ truncated over UDP and retried over TCP by `dig`; `NXDOMAIN` and `ANY`.
 
 - ~~Encrypted upstream (DNS over TLS) so the provider cannot read the names.~~ Done in 0.2.
 - ~~Per-device rules (stricter for a child's tablet) and schedules.~~ Done in 0.3 (profiles with a bedtime).
-- History on disk: blocked per day for a month.
+- ~~History on disk: blocked per day for a month.~~ Done in 0.4 (and `pythia demo`).
+- Recent queries per device: pick a device and see only its queries.
 
 ## License
 
