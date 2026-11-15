@@ -1,0 +1,29 @@
+# Copy to ~/.config/pythia/pythia.toml (contrib/install.sh does it) and edit.
+
+# Where to answer DNS. 127.0.0.1 for this machine; add its LAN address to serve the network.
+# The LAN address may be missing at boot (Wi-Fi not up yet): Pythia binds it anyway.
+listen = ["127.0.0.1:53"]
+# listen = ["127.0.0.1:53", "192.168.1.10:53"]
+
+# Who may ask. Never 0.0.0.0/0: that would be an open resolver for the whole internet.
+allow_networks = ["127.0.0.0/8", "::1/128"]
+# allow_networks = ["127.0.0.0/8", "::1/128", "192.168.1.0/24"]
+
+# On a laptop: answer the network only while the default gateway is your home router
+# (its MAC address: `ip neigh show $(ip route | awk '/default/ {print $3; exit}')`).
+# home_gateway_mac = "aa:bb:cc:dd:ee:ff"
+
+# Where allowed questions go (IP addresses).
+upstreams = ["1.1.1.1", "9.9.9.9"]
+
+# Block lists (https only), refreshed every list_refresh_hours.
+[[lists]]
+name = "stevenblack"
+url = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+
+# list_refresh_hours = 24
+# blocked_ttl = 300         # seconds devices remember a "blocked" answer
+# cache_size = 10000
+# rate_limit = 100          # queries per second per device (bursts of twice that)
+# log_queries = true        # recent queries in memory for the dashboard (never written to disk)
+# web_port = 8748           # dashboard on 127.0.0.1 only

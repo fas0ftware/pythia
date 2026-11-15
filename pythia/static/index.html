@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pythia</title>
+  <link rel="icon" href="/static/pythia.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/ui.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="/static/pythia.svg" alt="" width="28" height="28">
+      <span class="brand__name">Pythia</span>
+      <span class="brand__tag">DNS filter</span>
+      <span id="state" class="badge">…</span>
+    </div>
+    <div class="actions" id="pause-actions">
+      <button class="btn btn--small" type="button" data-minutes="5">Pause 5 min</button>
+      <button class="btn btn--small" type="button" data-minutes="60">Pause 1 h</button>
+      <button class="btn btn--small btn--primary" type="button" data-minutes="0" id="resume" hidden>Resume blocking</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <p id="error" class="error" hidden></p>
+    <section class="stats" id="stats" aria-label="Last 24 hours"></section>
+
+    <section class="panel">
+      <div class="panel__head"><h2 class="panel__title">Last 24 hours</h2><span class="note" id="legend"></span></div>
+      <div id="chart" class="chart" role="img" aria-label="Queries and blocked queries per hour"></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><h2 class="panel__title">Most blocked</h2><ol id="top-blocked" class="toplist"></ol></div>
+      <div class="panel"><h2 class="panel__title">Most asked (allowed)</h2><ol id="top-allowed" class="toplist"></ol></div>
+      <div class="panel"><h2 class="panel__title">Devices</h2><ol id="clients" class="toplist"></ol></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Recent queries</h2>
+        <div class="row filters">
+          <input type="text" id="filter" placeholder="filter by name or device" aria-label="Filter">
+          <select id="only" aria-label="Result"><option value="">all</option><option>blocked</option><option>forwarded</option><option>cached</option><option>error</option><option>refused</option></select>
+        </div>
+      </div>
+      <div class="scroll"><table class="table"><thead><tr><th>Time</th><th>Device</th><th>Name</th><th>Type</th><th>Result</th><th></th></tr></thead><tbody id="recent"></tbody></table></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2 class="panel__title">Your rules</h2>
+        <form id="rule" class="row">
+          <input type="text" id="domain" placeholder="example.com" aria-label="Domain" autocomplete="off">
+          <button class="btn btn--small" type="submit" data-kind="allow">Allow</button>
+          <button class="btn btn--small" type="submit" data-kind="block">Block</button>
+        </form>
+        <p id="verdict" class="note"></p>
+        <h3 class="section-title">Allowed</h3><ul id="allow" class="rules"></ul>
+        <h3 class="section-title">Blocked by you</h3><ul id="block" class="rules"></ul>
+      </div>
+      <div class="panel">
+        <h2 class="panel__title">Lists &amp; upstreams</h2>
+        <div id="lists"></div>
+        <button class="btn btn--small" type="button" id="update">Update lists now</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Installed by contrib/install.sh as /etc/systemd/system/pythia.service
+[Unit]
+Description=Pythia DNS filter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=@USER@
+Environment=PYTHONPATH=@LIB@
+ExecStart=/usr/bin/python3 -m pythia --config @CONFIG@ serve
+Restart=on-failure
+RestartSec=5
+# Port 53 without root: only this one capability, nothing else.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA@ @STATE@
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

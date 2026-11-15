@@ -1,0 +1,7 @@
+# Your machine's settings and data
+pythia.toml
+.trial.*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

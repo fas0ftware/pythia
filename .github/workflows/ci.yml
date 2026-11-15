@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pyflakes pythia tests
+      - run: python -m pytest -q
+      - name: Real server on a high port, real upstream
+        run: |
+          set -e
+          d="$RUNNER_TEMP/pythia"
+          mkdir -p "$d/data/lists"
+          { echo "0.0.0.0 doubleclick.net"; for i in $(seq 1 1500); do echo "0.0.0.0 d$i.example.invalid"; done; } > "$d/data/lists/test.txt"
+          printf 'listen = ["127.0.0.1:5354"]\nupstreams = ["1.1.1.1", "9.9.9.9"]\nweb_port = 8749\nlist_refresh_hours = 100000\ndata_dir = "%s/data"\nstatus_file = "%s/status.json"\n[[lists]]\nname = "test"\nurl = "https://example.invalid/test"\n' "$d" "$d" > "$d/p.toml"
+          python -m pythia --config "$d/p.toml" serve > "$d/log" 2>&1 &
+          sleep 3
+          cat "$d/log"
+          python - <<'PY'
+          import socket
+          from pythia import dns
+          def ask(name, t=dns.A):
+              s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(5)
+              s.sendto(dns.build_query(name, t), ("127.0.0.1", 5354))
+              return s.recv(4096)
+          blocked = ask("ads.doubleclick.net")
+          assert blocked.endswith(bytes(4)), "blocked answers 0.0.0.0"
+          real = ask("github.com")
+          assert dns.rcode(real) == 0 and not real.endswith(bytes(4)), "allowed names resolve"
+          assert dns.rcode(ask("github.com", dns.ANY)) == dns.REFUSED
+          print("ok")
+          PY
+          curl -fsS http://127.0.0.1:8749/api/summary
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install bandit
+      - run: bandit -q -r pythia
