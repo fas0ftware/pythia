@@ -52,6 +52,7 @@ class Settings:
     status_file: Path = Path("~/.local/state/pythia/status.json").expanduser()
     # Answer network clients only while the default gateway has this MAC (empty: always).
     home_gateway_mac: str = ""
+    profiles: list = field(default_factory=list)      # pythia.profiles.Profile
 
 
 def default_path() -> Path:
@@ -151,6 +152,12 @@ def parse(raw: dict) -> Settings:
         s.data_dir = Path(raw["data_dir"]).expanduser()
     if "status_file" in raw:
         s.status_file = Path(raw["status_file"]).expanduser()
+    if "profiles" in raw:
+        from .profiles import ProfileError, parse as parse_profiles
+        try:
+            s.profiles = parse_profiles(raw["profiles"])
+        except ProfileError as exc:
+            raise ConfigError(str(exc)) from None
     s.home_gateway_mac = str(raw.get("home_gateway_mac", "")).strip().lower()
     if s.home_gateway_mac and len(s.home_gateway_mac.split(":")) != 6:
         raise ConfigError("home_gateway_mac must look like aa:bb:cc:dd:ee:ff")

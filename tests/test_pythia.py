@@ -573,3 +573,51 @@ def test_tls_reconnects_after_the_server_closes_an_idle_connection(tmp_path):
     first, second, conns, failures = run(main())
     assert dns.response_id(first) == 1 and dns.response_id(second) == 2
     assert conns == 2 and failures == 0, "reconnected without counting a failure"
+
+
+# --- profiles (0.3) ---------------------------------------------------------------------------
+
+def test_profile_parsing_and_decisions():
+    from pythia import profiles
+    [p] = profiles.parse([{"name": "Kids tablet", "clients": ["192.168.1.50", "10.0.0.0/30"],
+                           "block": ["YouTube.com", "tiktok.com"], "allow": ["edu.youtube.com", "khanacademy.org"],
+                           "bedtime": "21-07"}])
+    assert p.decide("www.youtube.com", 12) == (True, "profile Kids tablet: youtube.com")
+    assert p.decide("edu.youtube.com", 12) == (False, ""), "a more specific allow wins"
+    assert p.decide("example.org", 12) == (False, "")
+    assert p.decide("example.org", 22) == (True, "profile Kids tablet: bedtime")
+    assert p.decide("example.org", 6) == (True, "profile Kids tablet: bedtime"), "bedtime wraps midnight"
+    assert p.decide("example.org", 7) == (False, "")
+    assert p.decide("www.khanacademy.org", 23) == (False, ""), "allowed names stay open at bedtime"
+    assert p.bedtime_now(21) and not p.bedtime_now(20)
+    for bad in ([{"clients": ["192.168.1.50"]}], [{"name": "x"}], [{"name": "x", "clients": ["0.0.0.0/0"]}],
+                [{"name": "x", "clients": ["nope"]}], [{"name": "x", "clients": ["10.0.0.1"], "bedtime": "7"}],
+                [{"name": "x", "clients": ["10.0.0.1"], "bedtime": "7-7"}],
+                [{"name": "x", "clients": ["10.0.0.1"], "block": ["not a domain"]}]):
+        with pytest.raises(profiles.ProfileError):
+            profiles.parse(bad)
+    with pytest.raises(config.ConfigError):
+        config.parse({"profiles": [{"name": "x"}]})
+
+
+def test_profiles_in_the_server():
+    from pythia import profiles
+    p, up = make()
+    p.s.profiles = profiles.parse([{"name": "Kids", "clients": ["192.168.1.50"], "block": ["games.example"],
+                                    "allow": ["school.example"], "bedtime": "21-07"}])
+    p.lists.allow.add("games.example")          # allowed for the house...
+    hour = [12]
+    p.local_hour = lambda: hour[0]
+    q = dns.build_query("play.games.example", dns.A)
+    assert run(p.handle(q, "192.168.1.50")).endswith(bytes(4)), "...but not on the kids' tablet"
+    assert not run(p.handle(q, "192.168.1.20")).endswith(bytes(4)), "other devices follow the house rules"
+    assert not run(p.handle(dns.build_query("news.example", dns.A), "192.168.1.50")).endswith(bytes(4))
+    hour[0] = 22
+    assert run(p.handle(dns.build_query("news.example", dns.A), "192.168.1.50")).endswith(bytes(4)), "bedtime"
+    assert not run(p.handle(dns.build_query("www.school.example", dns.A), "192.168.1.50")).endswith(bytes(4))
+    assert not run(p.handle(dns.build_query("news.example", dns.A), "::ffff:192.168.1.20")).endswith(bytes(4))
+    assert p.stats.recent[-3].rule == "profile Kids: bedtime"
+    p.paused_until = 1e12
+    assert not run(p.handle(dns.build_query("news.example", dns.A), "192.168.1.50")).endswith(bytes(4)), "pause lifts it"
+    s = p.summary()["profiles"][0]
+    assert s["name"] == "Kids" and s["bedtime"] == "21-07" and s["bedtime_now"] is True and s["clients"] == ["192.168.1.50/32"]

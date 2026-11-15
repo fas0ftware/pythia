@@ -1,7 +1,7 @@
 # Pythia
 
 [![CI](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/fas0ftware/pythia/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
@@ -29,6 +29,7 @@ $ dig @192.168.1.10 doubleclick.net AAAA +short
 - [Install](#install)
 - [Making the network use it](#making-the-network-use-it)
 - [Dashboard](#dashboard)
+- [Per-device profiles](#per-device-profiles)
 - [Settings](#settings)
 - [Security and privacy](#security-and-privacy)
 - [Testing](#testing)
@@ -112,6 +113,26 @@ health, and *pause 5 min / 1 h* for when a site breaks. `GET /api/summary` gives
 counts as JSON, and the same summary is written to `~/.local/state/pythia/status.json`
 every 30 seconds for dashboards such as [Olympos](https://github.com/fas0ftware/olympos).
 
+## Per-device profiles
+
+Stricter rules for chosen devices, a child's tablet for example. Give those devices fixed
+addresses in the router, then:
+
+```toml
+[[profiles]]
+name = "Kids tablet"
+clients = ["192.168.1.50"]                 # addresses or networks
+block = ["youtube.com", "tiktok.com"]      # on top of the house lists
+allow = ["edu.youtube.com", "khanacademy.org"]
+bedtime = "21-07"                          # local hours: everything else is blocked then
+```
+
+A profile is checked before the house lists, so a name allowed for the house can still be
+blocked on the tablet. The most specific entry wins (`edu.youtube.com` stays open while
+`youtube.com` is blocked); during bedtime only the profile's `allow` names answer. *Pause*
+on the dashboard lifts profiles too. The dashboard lists the profiles and says when
+bedtime is on, and blocked queries name the rule (`profile Kids tablet: bedtime`).
+
 ## Settings
 
 `~/.config/pythia/pythia.toml` (template: [`pythia.example.toml`](pythia.example.toml)):
@@ -181,7 +202,7 @@ truncated over UDP and retried over TCP by `dig`; `NXDOMAIN` and `ANY`.
 ## Roadmap
 
 - ~~Encrypted upstream (DNS over TLS) so the provider cannot read the names.~~ Done in 0.2.
-- Per-device rules (stricter for a child's tablet) and schedules.
+- ~~Per-device rules (stricter for a child's tablet) and schedules.~~ Done in 0.3 (profiles with a bedtime).
 - History on disk: blocked per day for a month.
 
 ## License

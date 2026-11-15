@@ -29,3 +29,11 @@ url = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
 # rate_limit = 100          # queries per second per device (bursts of twice that)
 # log_queries = true        # recent queries in memory for the dashboard (never written to disk)
 # web_port = 8748           # dashboard on 127.0.0.1 only
+
+# Stricter rules for chosen devices (give them fixed addresses in the router).
+# [[profiles]]
+# name = "Kids tablet"
+# clients = ["192.168.1.50"]
+# block = ["youtube.com", "tiktok.com"]
+# allow = ["edu.youtube.com"]
+# bedtime = "21-07"          # local hours: only `allow` names answer then

@@ -240,6 +240,7 @@ class Pythia:
         self.lists_updated: str = ""
         self.at_home = True            # updated every 30 s when home_gateway_mac is set
         self.in_flight = 0
+        self.local_hour = lambda: time.localtime().tm_hour   # tests set the clock
         self.tcp_open: dict[str, int] = {}
 
     # --- policy ------------------------------------------------------------------------------
@@ -254,6 +255,17 @@ class Pythia:
         if not addr.is_loopback and not self.at_home:
             return False      # away from home: serve this machine only, never the network we are on
         return any(addr in n for n in self.s.allow_networks)
+
+    def profile_for(self, ip: str):
+        if not self.s.profiles:
+            return None
+        try:
+            addr = ipaddress.ip_address(ip.split("%")[0])
+        except ValueError:
+            return None
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return next((p for p in self.s.profiles if p.covers(addr)), None)
 
     @property
     def blocking(self) -> bool:
@@ -282,6 +294,12 @@ class Pythia:
             self.record(client, q.name, q.type_name, "refused", "ANY/class")
             return dns.error_response(q, dns.REFUSED)
         if self.blocking:
+            profile = self.profile_for(client)
+            if profile is not None:
+                blocked, rule = profile.decide(q.name, self.local_hour())
+                if blocked:
+                    self.record(client, q.name, q.type_name, "blocked", rule, (time.monotonic() - start) * 1000)
+                    return dns.blocked_response(q, self.s.blocked_ttl)
             blocked, rule = self.lists.verdict(q.name)
             if blocked:
                 self.record(client, q.name, q.type_name, "blocked", rule, (time.monotonic() - start) * 1000)
@@ -336,6 +354,7 @@ class Pythia:
             "lists_updated": self.lists_updated,
             "allow_entries": len(self.lists.allow),
             "custom_blocks": len(self.lists.custom_block),
+            "profiles": [p.summary(self.local_hour()) for p in self.s.profiles],
             "cache_entries": len(self.cache),
             "cache_hits": self.cache.hits,
             "upstreams": self.upstream.health(),
