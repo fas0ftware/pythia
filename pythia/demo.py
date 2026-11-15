@@ -35,7 +35,8 @@ class DemoLists(Lists):
 
 def build(now: float | None = None, seed: int = 7) -> Pythia:
     now = now or time.time()
-    rnd = random.Random(seed)   # nosec B311: made-up demo numbers, not security
+    # made-up demo numbers, not security
+    rnd = random.Random(seed)  # nosec B311
     data = Path(tempfile.mkdtemp(prefix="pythia-demo-"))
     s = Settings(data_dir=data, status_file=data / "status.json",
                  upstreams=list(DEFAULT_UPSTREAMS),
