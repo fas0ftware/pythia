@@ -360,3 +360,59 @@ def test_away_from_home_serves_only_this_machine():
     q = dns.build_query("www.example.org", dns.A)
     assert run(p.handle(q, "192.168.1.20")) is None
     assert run(p.handle(q, "127.0.0.1")) is not None
+
+
+def test_flood_limits():
+    p, up = make()
+
+    class Slow(FakeUpstream):
+        async def ask(self, packet, tcp):
+            await asyncio.sleep(0.2)
+            return answer_for(packet, 60)
+
+    p.upstream = Slow()
+
+    async def flood():
+        qs = [p.handle(dns.build_query(f"n{i}.example.org", dns.A), f"192.168.1.{i % 250 + 1}") for i in range(400)]
+        return await asyncio.gather(*qs)
+
+    answers = run(flood())
+    fails = sum(1 for a in answers if dns.rcode(a) == dns.SERVFAIL)
+    assert fails == 400 - server.MAX_IN_FLIGHT and p.in_flight == 0
+
+
+def test_big_cached_answer_not_sent_over_small_udp():
+    p, up = make()
+    plain = dns.build_query("big.example.org", dns.A)
+    # the same question with an EDNS OPT record (UDP size 1232)
+    edns = dns.HEADER.pack(0x1234, dns.RD, 1, 0, 0, 1) + plain[12:] + b"\x00" + struct.pack("!HHIH", dns.OPT, 1232, 0, 0)
+    key = ("big.example.org", dns.A, 1)
+    stored = dns.HEADER.pack(0, dns.QR | dns.RA, 1, 0, 0, 0) + dns.parse_query(plain).question
+    for size, query, asks in ((600, plain, 1), (1000, edns, 0), (4000, edns, 1), (4000, plain, 1)):
+        up.calls = 0
+        p.cache._d[key] = (p.cache.clock(), p.cache.clock() + 300, stored + bytes(size), [])
+        run(p.handle(query, "127.0.0.1"))
+        assert up.calls == asks, (size, asks)
+
+
+def test_tcp_connection_cap():
+    async def main():
+        p, _ = make()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        p.s.listen = [("127.0.0.1", port)]
+        servers = await server.start(p)
+        conns = [await asyncio.open_connection("127.0.0.1", port) for _ in range(server.MAX_TCP_PER_CLIENT + 3)]
+        await asyncio.sleep(0.2)
+        open_now = sum(p.tcp_open.values())
+        extra_r, extra_w = conns[-1]
+        closed = await asyncio.wait_for(extra_r.read(1), 2) == b""
+        for _, w in conns:
+            w.close()
+        await asyncio.sleep(0.2)
+        for srv in servers:
+            srv.close()
+        return open_now, closed, sum(p.tcp_open.values())
+    open_now, closed, after = run(main())
+    assert open_now == server.MAX_TCP_PER_CLIENT and closed and after == 0

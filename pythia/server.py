@@ -22,6 +22,10 @@ from .stats import Stats
 UPSTREAM_TIMEOUT = 2.0
 TCP_IDLE = 10.0
 MAX_TCP_MESSAGE = 65535
+MAX_IN_FLIGHT = 256       # upstream queries at once; more means a flood, answered SERVFAIL
+MAX_TCP_CONNECTIONS = 100
+MAX_TCP_PER_CLIENT = 10
+SAFE_UDP_SIZE = 1232      # the size every EDNS client accepts (DNS flag day 2020)
 IP_FREEBIND = 15   # Linux: bind an address this machine does not have yet (Wi-Fi not up at boot)
 
 
@@ -131,6 +135,8 @@ class Pythia:
         self.listening: list[str] = []
         self.lists_updated: str = ""
         self.at_home = True            # updated every 30 s when home_gateway_mac is set
+        self.in_flight = 0
+        self.tcp_open: dict[str, int] = {}
 
     # --- policy ------------------------------------------------------------------------------
 
@@ -178,16 +184,25 @@ class Pythia:
                 return dns.blocked_response(q, self.s.blocked_ttl)
         key = (q.name, q.qtype, q.qclass)
         cached = self.cache.get(key, q.id)
-        # Without EDNS a client over UDP accepts at most 512 bytes: ask again rather than truncate.
-        if cached is not None and (tcp or len(cached) <= 512 or dns.has_additional(data)):
+        # Over UDP hand out only what the client surely accepts (512 without EDNS, else 1232);
+        # a bigger cached answer is fetched again so the upstream can size or truncate it.
+        limit = SAFE_UDP_SIZE if dns.has_additional(data) else 512
+        if cached is not None and (tcp or len(cached) <= limit):
             self.record(client, q.name, q.type_name, "cached", "", (time.monotonic() - start) * 1000)
             return cached
+        if self.in_flight >= MAX_IN_FLIGHT:
+            # Spoofed source addresses get past the per-client limit; this cap does not.
+            self.record(client, q.name, q.type_name, "refused", "overloaded")
+            return dns.error_response(q, dns.SERVFAIL)
         our_id = secrets.randbelow(65536)
+        self.in_flight += 1
         try:
             answer = await self.upstream.ask(dns.with_id(data, our_id), tcp)
         except OSError:
             self.record(client, q.name, q.type_name, "error", "upstream", (time.monotonic() - start) * 1000)
             return dns.error_response(q, dns.SERVFAIL)
+        finally:
+            self.in_flight -= 1
         if not _same_question(q, answer):
             self.record(client, q.name, q.type_name, "error", "mismatched answer")
             return dns.error_response(q, dns.SERVFAIL)
@@ -247,9 +262,16 @@ class UdpServer(asyncio.DatagramProtocol):
 
 async def _tcp_client(app: Pythia, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     peer = writer.get_extra_info("peername")
+    ip = peer[0] if peer else ""
+    counted = False
     try:
-        if not peer or not app.client_allowed(peer[0]):
+        if not peer or not app.client_allowed(ip):
             return
+        # Idle connections cost a file descriptor each: cap them, in total and per device.
+        if sum(app.tcp_open.values()) >= MAX_TCP_CONNECTIONS or app.tcp_open.get(ip, 0) >= MAX_TCP_PER_CLIENT:
+            return
+        app.tcp_open[ip] = app.tcp_open.get(ip, 0) + 1
+        counted = True
         while True:
             head = await asyncio.wait_for(reader.readexactly(2), TCP_IDLE)
             size = struct.unpack("!H", head)[0]
@@ -264,6 +286,10 @@ async def _tcp_client(app: Pythia, reader: asyncio.StreamReader, writer: asyncio
     except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError):
         pass
     finally:
+        if counted:
+            app.tcp_open[ip] -= 1
+            if not app.tcp_open[ip]:
+                del app.tcp_open[ip]
         writer.close()
 
 

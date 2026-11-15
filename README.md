@@ -43,7 +43,9 @@ For each query, over UDP or TCP:
    dropped silently, so Pythia can never be used as an open resolver. On a laptop,
    `home_gateway_mac` limits network clients to the home network: in a café it serves
    only the laptop itself.
-2. **Too fast?** A token bucket per device (100 queries/s, bursts of 200) drops floods.
+2. **Too fast?** A token bucket per device (100 queries/s, bursts of 200) drops floods; at most
+   256 upstream queries run at once and 100 TCP connections (10 per device) stay open, so
+   spoofed source addresses cannot exhaust memory or file descriptors either.
 3. **Well formed?** One question, standard query, class IN. Malformed packets get
    `FORMERR`; `ANY` gets `REFUSED` (the classic amplification query).
 4. **Blocked?** The name and each parent (`a.ads.example.com`, `ads.example.com`,
